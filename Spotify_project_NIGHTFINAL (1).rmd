@@ -1,0 +1,609 @@
+---
+title: "Проект по Эконометрике 30/11"
+author: "Команда 14"
+date: "2023-11-25"
+output:
+  html_document:
+    df_print: paged
+---
+
+**Задание: Draft**
+
+Formatting the report into a draft final report, creating an approximate structure for the entire final
+
+report, starting work on regression analysis, adjusting the data set or research question if necessary,
+
+adding exploratory data analysis, justifying the relevance of the data to the question posed, correcting the
+
+question if necessary, initial formulation of the model. Progress in working with models, initial analysis of
+
+the results and refinement of models and estimates as necessary, registration of the results of regression
+
+analysis and analysis of results, beginning of work on the analysis of the limitations of the study and the
+
+discussion part
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl) #подгрузка данных из экселя
+library(readr) #подгрузка данных из CSV
+library(dplyr) #вычисления, соединения датасетов, описательные статистики
+library(tidyr) #вычисления, соединения датасетов, описательные статистики
+library(ggplot2) #графички :)
+library(lmtest) # регрессия, тестирование гипотез
+library(modelsummary) #красивые таблички для summary по статистикам и по результатам регрессий:)
+library(psych) #пакет для психологов - но тоже считает описательные статистики
+library(sandwich) # ковариация, ст. ошибки
+library(ggpubr)
+library(wooldridge)
+library(tidyverse)
+library(sandwich)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(GGally)
+library(conflicted)
+library(corrplot)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+```
+
+## Загрузка и предобработка данных
+
+```{r}
+spotify <- read.csv("C:\\Users\\batus\\Desktop\\R\\music_data_filtered.csv")
+spotify
+
+#С матом/без мата - пустые значения в 0
+spotify[is.na(spotify)] = 0
+
+#Логическую в булевую
+spotify$explicit <- as.integer(as.logical(spotify$explicit))
+
+
+
+```
+
+## Саммери статистика и обзор данных
+
+```{r}
+#Уберем индексы
+spotify_numeric <- spotify[, sapply(spotify, is.numeric)]
+spotify_numeric <- spotify_numeric[, !names( spotify_numeric) %in% c('X')]   
+
+#Корреляционная матрица для данных                                                
+palette = colorRampPalette(c("purple4", "white", "pink2"))(20)
+correlation_matrix <- cor(spotify_numeric)
+corrplot(correlation_matrix, method = "color", col = palette, tl.col = "black")
+mtext("Correlation Matrix", at=-10, line=-0.5, cex=2)
+
+#График зависимости популярности от года выпуска
+spotify %>%
+  ggplot(aes(y = year, x = popularity)) +
+  geom_point( shape= 19, size=2, colour='purple2') +
+  labs(x = 'Popularity',
+       y = 'Year')+
+  scale_y_continuous(breaks = c(1985,1990,1995,2000,2005,2010,2015,2020,2023))
+
+# Саммери статистика 
+summary(spotify_numeric)
+```
+
+## Разделение выборки  на подвыборки по годам
+
+#### + Нужно объяснить почему делим
+
+```{r}
+#Поделим на 4 выборки по годам (для каждого периода подвыборка со всеми типами переменных и только числовыми/белиевыми)
+time1 <- 1996:2000
+time2 <- 2001:2005
+time3 <- 2006:2010
+time4 <- 2011:2015
+
+#Подвыборки
+spotify_1 <- subset(spotify, year %in% time1)
+spotify_2 <- subset(spotify, year %in% time2)
+spotify_3 <- subset(spotify, year %in% time3)
+spotify_4 <- subset(spotify, year %in% time4)
+
+
+#Подвыборки только c числовыми/булиевыми переменными
+spotify_num1 <- subset(spotify_numeric, year %in% time1)
+spotify_num2 <- subset(spotify_numeric, year %in% time2)
+spotify_num3 <- subset(spotify_numeric, year %in% time3)
+spotify_num4 <- subset(spotify_numeric, year %in% time4)
+```
+
+# Регрессии
+
+## Первый период
+
+### Множественная регрессия
+
+```{r}
+#Первый период
+#Посмотрим на корреляционную матрицу
+
+palette = colorRampPalette(c("seagreen", "white", "green2"))(20)
+
+num1_noyear <-  spotify_num1[, !names(spotify_num1) %in% c('year')]   
+correlation_matrix <- cor(num1_noyear)
+corrplot(correlation_matrix, method = "color", col = palette,tl.col = "black")
+mtext("Years 1996-2000", at=-10, line=-0.5, cex=2)
+
+# Множественная регрессия по всем переменным (КРОМЕ ENERGY) 
+reg11 <- lm(spotify_num1$popularity ~ spotify_num1$duration_ms + spotify_num1$explicit + spotify_num1$principal_artist_followers + spotify_num1$acousticness + spotify_num1$danceability +  spotify_num1$key + spotify_num1$liveness + spotify_num1$loudness + spotify_num1$speechiness + spotify_num1$tempo + spotify_num1$time_signature + spotify_num1$valence, data = spotify_num1)
+summary(reg11) 
+tidy(reg11)
+
+# Регрессия с регрессорами loudness, explicit, principal followers and valence (регрессоры с наибольшим значением корреляции с Y)
+reg12 <- lm(spotify_num1$popularity ~ spotify_num1$explicit + spotify_num1$principal_artist_followers + spotify_num1$loudness  + spotify_num1$valence, data = spotify_num1)
+summary(reg12) 
+#tab_model(reg21)
+```
+
+#### Заметка для статистических тестов для множественной регрессии
+
+### Значимые регрессоры
+
+```{r}
+# Скаттерплоты
+plot(spotify_num1$principal_artist_followers,spotify_num1$popularity, ylab = "Popularity", xlab = "Principal followers", col = "seagreen2", main = "Scatterplot for Principal followers")
+
+plot(spotify_num1$loudness,spotify_num1$popularity, ylab = "Popularity", xlab = "Loudness", col = "seagreen2", main = "Scatterplot for Loudness")
+
+plot(spotify_num1$valence,spotify_num1$popularity, ylab = "Popularity", xlab = "Valence", col = "seagreen2", main = "Scatterplot for Valence")
+
+#Боксплоты
+ggplot(spotify_num1) +
+  geom_boxplot(aes(x=loudness),col = "purple4")
+
+ggplot(spotify_num1) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "purple4")
+
+ggplot(spotify_num1) +
+  geom_boxplot(aes(x=valence),col = "purple4")
+
+
+```
+
+### Отчистка от выбросов, Парные регрессии
+
+```{r}
+## Избавимся от выбросов (интерквартальным методом) и построим парные регрессии
+## Loudness
+Q1 <- quantile(spotify_num1$loudness, .25)
+Q3 <- quantile(spotify_num1$loudness, .75)
+IQR <- IQR(spotify_num1$loudness)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num1, spotify_num1$loudness> (Q1 - 1.5*IQR) & spotify_num1$loudness< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$loudness,no_outliers$popularity, ylab = "Popularity", xlab = "Loudness", col = "purple4", main = "New scatterplot for Loudness")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=loudness),col = "green4")
+
+# Парная регрессия
+reg_loud1 <- lm(no_outliers$popularity ~ no_outliers$loudness)
+summary(reg_loud1) 
+
+```
+
+```{r}
+## principal_artist_followers
+Q1 <- quantile(spotify_num1$principal_artist_followers, .25)
+Q3 <- quantile(spotify_num1$principal_artist_followers, .75)
+IQR <- IQR(spotify_num1$principal_artist_followers)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num1, spotify_num1$principal_artist_followers> (Q1 - 1.5*IQR) & spotify_num1$principal_artist_followers< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$principal_artist_followers,no_outliers$popularity, ylab = "Popularity", xlab = "Principal followers", col = "purple4", main = "New scatterplot for Principal followers")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "green4")
+
+# Парная регрессия
+reg_fol1 <- lm(no_outliers$popularity ~ no_outliers$principal_artist_followers)
+summary(reg_fol1) 
+```
+
+```{r}
+## valence
+Q1 <- quantile(spotify_num1$valence, .25)
+Q3 <- quantile(spotify_num1$valence, .75)
+IQR <- IQR(spotify_num1$valence)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num1, spotify_num1$valence> (Q1 - 1.5*IQR) & spotify_num1$valence< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$valence,no_outliers$popularity, ylab = "Popularity", xlab = "Valence", col = "purple4", main = "New scatterplot for Valence")
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=valence),col = "green4")
+
+# Парная регрессия
+reg_val1 <- lm(no_outliers$popularity~ no_outliers$valence)
+summary(reg_val1) 
+```
+
+#### Заметка для статистических тестов для парных регрессий
+
+## Второй период
+
+### Множественная регрессия
+
+```{r}
+# Посмотрим на корреляционную матрицу
+palette = colorRampPalette(c("seagreen", "white", "green2"))(20)
+
+num2_noyear <-  spotify_num2[, !names(spotify_num2) %in% c('year')]   
+correlation_matrix2 <- cor(num2_noyear)
+corrplot(correlation_matrix2, method = "color", col = palette,tl.col = "black")
+mtext("Years 2001-2005", at=-10, line=-0.5, cex=2)
+
+# Множественная регрессия по всем переменным (КРОМЕ ENERGY)  
+reg21 <- lm(spotify_num2$popularity ~ spotify_num2$duration_ms + spotify_num2$explicit + spotify_num2$principal_artist_followers + spotify_num2$acousticness + spotify_num2$danceability +  spotify_num2$key + spotify_num2$liveness + spotify_num2$loudness + spotify_num2$speechiness + spotify_num2$tempo + spotify_num2$time_signature + spotify_num2$valence, data = spotify_num2)
+summary(reg21) 
+
+#Регрессия только для loudness, danceability, principal followers 
+reg22 <- lm(spotify_num2$popularity ~ spotify_num2$speechiness + spotify_num2$danceability + spotify_num2$principal_artist_followers + spotify_num2$loudness, data = spotify_num2)
+summary(reg22)
+
+```
+
+#### Заметка для статистических тестов для множественной регрессии
+
+### Значимые регрессоры
+
+```{r}
+# Скаттерплоты
+plot(spotify_num2$principal_artist_followers,spotify_num2$popularity, ylab = "Popularity", xlab = "Principal followers", col = "seagreen", main = "Scatterplot for Principal followers")
+
+plot(spotify_num2$loudness,spotify_num2$popularity, ylab = "Popularity", xlab = "Loudness", col = "seagreen", main = "Scatterplot for Loudness")
+
+plot(spotify_num2$danceability,spotify_num2$popularity, ylab = "Popularity", xlab = "Danceability", col = "seagreen", main = "Scatterplot of Danceability")
+
+plot(spotify_num2$speechiness,spotify_num2$popularity, ylab = "Popularity", xlab = "Speechiness", col = "seagreen", main = "Scatterplot of Speechiness")
+
+#Боксплоты
+ggplot(spotify_num2) +
+  geom_boxplot(aes(x=loudness),col = "purple4")
+
+ggplot(spotify_num2) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "purple4")
+
+ggplot(spotify_num2) +
+  geom_boxplot(aes(x=danceability),col = "purple4")
+
+ggplot(spotify_num2) +
+  geom_boxplot(aes(x=speechiness),col = "purple4")
+```
+
+### Отчистка от выбросов, Парные регрессии
+
+```{r}
+## Избавимся от выбросов (интерквартальным методом) и построим парные регрессии
+## Loudness
+Q1 <- quantile(spotify_num2$loudness, .25)
+Q3 <- quantile(spotify_num2$loudness, .75)
+IQR <- IQR(spotify_num2$loudness)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num2, spotify_num2$loudness> (Q1 - 1.5*IQR) & spotify_num2$loudness< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$loudness,no_outliers$popularity, ylab = "Popularity", xlab = "Loudness", col = "purple4", main = "New scatterplot for Loudness")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=loudness),col = "green4")
+
+# Парная регрессия
+reg_loud2 <- lm(no_outliers$popularity ~ no_outliers$loudness)
+summary(reg_loud2) 
+```
+
+```{r}
+## principal_artist_followers
+Q1 <- quantile(spotify_num2$principal_artist_followers, .25)
+Q3 <- quantile(spotify_num2$principal_artist_followers, .75)
+IQR <- IQR(spotify_num2$principal_artist_followers)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num2, spotify_num2$principal_artist_followers> (Q1 - 1.5*IQR) & spotify_num2$principal_artist_followers< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$principal_artist_followers,no_outliers$popularity, ylab = "Popularity", xlab = "Principal followers", col = "purple4", main = "New scatterplot for Principal followers")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "green4")
+
+# Парная регрессия
+reg_fol2 <- lm(no_outliers$popularity ~ no_outliers$principal_artist_followers)
+summary(reg_fol2) 
+```
+
+```{r}
+## dancibility
+Q1 <- quantile(spotify_num2$danceability, .25)
+Q3 <- quantile(spotify_num2$danceability, .75)
+IQR <- IQR(spotify_num2$danceability)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num2, spotify_num2$danceability> (Q1 - 1.5*IQR) & spotify_num2$danceability< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$danceability,no_outliers$popularity, ylab = "Popularity", xlab = "Danceability", col = "purple4", main = "New scatterplot for Danceability")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=danceability),col = "green4")
+
+# Парная регрессия
+reg_d2 <- lm(no_outliers$popularity ~ no_outliers$danceability)
+summary(reg_d2) 
+```
+
+```{r}
+##  speechiness
+Q1 <- quantile(spotify_num2$speechiness, .25)
+Q3 <- quantile(spotify_num2$ speechiness, .75)
+IQR <- IQR(spotify_num2$speechiness)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num2, spotify_num2$speechiness> (Q1 - 1.5*IQR) & spotify_num2$ speechiness< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$ speechiness,no_outliers$popularity, ylab = "Popularity", xlab = "Speechiness", col = "purple4", main = "New scatterplot for Speechiness")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x= speechiness),col = "green4")
+
+# Парная регрессия
+reg_s2 <- lm(no_outliers$popularity ~ no_outliers$speechiness)
+summary(reg_s2) 
+```
+
+## Третий период
+
+### Множественная регрессия
+
+```{r}
+# Посмотрим на корреляционную матрицу
+palette = colorRampPalette(c("seagreen", "white", "green2"))(20)
+
+num3_noyear <-  spotify_num3[, !names(spotify_num3) %in% c('year')]   
+correlation_matrix3 <- cor(num3_noyear)
+corrplot(correlation_matrix3, method = "color", col = palette,tl.col = "black")
+mtext("Years 2006-2010", at=-10, line=-0.5, cex=2)
+
+# Множественная регрессия по всем переменным (КРОМЕ ENERGY)  
+reg31 <- lm(spotify_num3$popularity ~ spotify_num3$duration_ms + spotify_num3$explicit + spotify_num3$principal_artist_followers + spotify_num3$acousticness + spotify_num3$danceability +  spotify_num3$key + spotify_num3$liveness + spotify_num3$loudness + spotify_num3$speechiness + spotify_num3$tempo + spotify_num3$time_signature + spotify_num3$valence, data = spotify_num3)
+summary(reg31) 
+
+#Регрессия только для principal_artist_followers, danceability
+reg32 <- lm(spotify_num3$popularity ~ spotify_num3$principal_artist_followers + spotify_num3$danceability, data = spotify_num3)
+summary(reg32)
+```
+
+#### Заметка для статистических тестов для множественной регрессии
+
+### Значимые регрессоры
+
+```{r}
+# Скаттерплоты
+plot(spotify_num3$principal_artist_followers,spotify_num3$popularity, ylab = "Popularity", xlab = "Followers", col = "seagreen", main = "Scatterplot for Principal followers")
+
+plot(spotify_num3$danceability,spotify_num3$popularity, ylab = "Popularity", xlab = "danceability", col = "seagreen", main = "Scatterplot for Danceability")
+
+#Боксплоты
+ggplot(spotify_num3) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "purple4")
+
+ggplot(spotify_num3) +
+  geom_boxplot(aes(x=danceability),col = "purple4")
+```
+
+### Очистка от выбросов и Парные регрессии
+
+```{r}
+## principal_artist_followers
+Q1 <- quantile(spotify_num3$principal_artist_followers, .25)
+Q3 <- quantile(spotify_num3$principal_artist_followers, .75)
+IQR <- IQR(spotify_num3$principal_artist_followers)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num3, spotify_num3$principal_artist_followers> (Q1 - 1.5*IQR) & spotify_num3$principal_artist_followers< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$principal_artist_followers,no_outliers$popularity, ylab = "Popularity", xlab = "Principal followers", col = "purple4", main = "New scatterplot for Principal followers")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "green4")
+
+# Парная регрессия
+reg_fol3 <- lm(no_outliers$popularity ~ no_outliers$principal_artist_followers)
+summary(reg_fol3) 
+```
+
+```{r}
+## dancibility
+Q1 <- quantile(spotify_num3$danceability, .25)
+Q3 <- quantile(spotify_num3$danceability, .75)
+IQR <- IQR(spotify_num3$danceability)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num3, spotify_num3$danceability> (Q1 - 1.5*IQR) & spotify_num3$danceability< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$danceability,no_outliers$popularity, ylab = "Popularity", xlab = "Danceability", col = "purple4", main = "New scatterplot for Danceability")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=danceability),col = "green4")
+
+# Парная регрессия
+reg_d3 <- lm(no_outliers$popularity ~ no_outliers$danceability)
+summary(reg_d3) 
+```
+
+## Четвертый период
+
+### Множественная регрессия
+
+```{r}
+# Посмотрим на корреляционную матрицу
+palette = colorRampPalette(c("seagreen", "white", "green2"))(20)
+
+num4_noyear <-  spotify_num4[, !names(spotify_num4) %in% c('year')]   
+correlation_matrix4 <- cor(num4_noyear)
+corrplot(correlation_matrix4, method = "color", col = palette,tl.col = "black")
+mtext("Years 2011-2015", at=-10, line=-0.5, cex=2)
+
+# Множественная регрессия по всем переменным (КРОМЕ ENERGY)  
+reg41 <- lm(spotify_num4$popularity ~ spotify_num4$duration_ms + spotify_num4$explicit + spotify_num4$principal_artist_followers + spotify_num4$acousticness + spotify_num4$danceability +  spotify_num4$key + spotify_num4$liveness + spotify_num4$loudness + spotify_num4$speechiness + spotify_num4$tempo + spotify_num4$time_signature + spotify_num4$valence, data = spotify_num2)
+summary(reg41) 
+
+#Регрессия только для loudness, danceability, principal followers, loudness 
+reg42 <- lm(spotify_num4$popularity ~  spotify_num4$speechiness + spotify_num4$danceability + spotify_num4$principal_artist_followers, data = spotify_num4)
+summary(reg42)
+```
+
+#### Заметка для статистических тестов для множественной регрессии
+
+### Значимые регрессоры
+
+```{r}
+# Скаттерплоты
+plot(spotify_num4$principal_artist_followers,spotify_num4$popularity, ylab = "Popularity", xlab = "Principal followers", col = "seagreen", main = "Scatterplot for Principal followers")
+
+plot(spotify_num4$danceability,spotify_num4$popularity, ylab = "Popularity", xlab = "danceability", col = "seagreen", main = "Scatterplot for Danceability")
+
+plot(spotify_num4$speechiness,spotify_num4$popularity, ylab = "Popularity", xlab = "speechiness", col = "seagreen", main = "Scatterplot for speechiness")
+
+#Боксплоты
+ggplot(spotify_num4) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "purple4")
+
+ggplot(spotify_num4) +
+  geom_boxplot(aes(x=danceability),col = "purple4")
+
+ggplot(spotify_num4) +
+  geom_boxplot(aes(x=speechiness),col = "purple4")
+
+
+
+```
+
+### Очистка от выбросов, Парные регрессии
+
+```{r}
+## principal_artist_followers
+Q1 <- quantile(spotify_num4$principal_artist_followers, .25)
+Q3 <- quantile(spotify_num4$principal_artist_followers, .75)
+IQR <- IQR(spotify_num4$principal_artist_followers)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num4, spotify_num4$principal_artist_followers> (Q1 - 1.5*IQR) & spotify_num4$principal_artist_followers< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$principal_artist_followers,no_outliers$popularity, ylab = "Popularity", xlab = "Principal followers", col = "purple4", main = "New scatterplot for Principal followers")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=principal_artist_followers),col = "green4")
+
+# Парная регрессия
+reg_fol4 <- lm(no_outliers$popularity ~ no_outliers$principal_artist_followers)
+summary(reg_fol4) 
+```
+
+```{r}
+## dancibility
+Q1 <- quantile(spotify_num4$danceability, .25)
+Q3 <- quantile(spotify_num4$danceability, .75)
+IQR <- IQR(spotify_num4$danceability)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num4, spotify_num4$danceability> (Q1 - 1.5*IQR) & spotify_num4$danceability< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$danceability,no_outliers$popularity, ylab = "Popularity", xlab = "Danceability", col = "purple4", main = "New scatterplot for Danceability")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x=danceability),col = "green4")
+
+# Парная регрессия
+reg_d4 <- lm(no_outliers$popularity ~ no_outliers$danceability)
+summary(reg_d4) 
+```
+
+```{r}
+##  speechiness
+Q1 <- quantile(spotify_num4$speechiness, .25)
+Q3 <- quantile(spotify_num4$ speechiness, .75)
+IQR <- IQR(spotify_num4$speechiness)
+
+#only keep rows in dataframe that have values within 1.5\*IQR of Q1 and Q3
+no_outliers <- subset(spotify_num4, spotify_num4$speechiness> (Q1 - 1.5*IQR) & spotify_num4$ speechiness< (Q3 + 1.5*IQR))
+
+#view row and column count of new data frame
+dim(no_outliers) 
+
+#Снова строим скаттер и боксплот
+plot(no_outliers$ speechiness,no_outliers$popularity, ylab = "Popularity", xlab = "Speechiness", col = "purple4", main = "New scatterplot for Speechiness")
+
+ggplot(no_outliers) +
+  geom_boxplot(aes(x= speechiness),col = "green4")
+
+# Парная регрессия
+reg_s4 <- lm(no_outliers$popularity ~ no_outliers$speechiness)
+summary(reg_s4) 
+```
+
+### Что дальше?
+
+Далее можно было бы построить регрессию по выборке с 1995 по 2015 года. В качестве регрессоров взять те, которые показали себя как наиболее точные на первом этапе (это скорее количество подписчиков, танцевальность, разговорность и громкость).
+
+1.  Попробовать (по методу ОБРАТНОГО ИСКЛЮЧЕНИЯ) из этих 4 убрать наименее значимый и посмотреть, что станет с результатами F-test.
+2.  Также можно проверить, не потеряли ли мы какие-то значимые регрессоры и попробовать добавить к этим 4 другие более-менее значимые (метод ПРЯМОГО ВКЛЮЧЕНИЯ)
+3.  Далее можно было бы попробовать ОБЕРТОЧНЫЕ методы, перемешать выборку, выделить тест и трейн сеты, попробовать обучить модель и посмотреть, насколько точной она получится. Но тут лучше уточнить, можно ли нам пользоваться такими методами.
